@@ -8,16 +8,13 @@
         body { font-family: sans-serif; background: #f4f4f4; display: flex; justify-content: center; padding: 20px; margin: 0; }
         #visualization-wrapper { position: relative; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); max-width: 1000px; width: 100%; }
         #map-container { width: 100%; overflow: hidden; }
-        #legend-container { position: absolute; bottom: 60px; right: 60px; transform: rotate(-45deg); background: rgba(255, 255, 255, 0.9); padding: 10px; border-radius: 4px; }
-        .legend-text-x { transform: translate(-18px, -6px) rotate(45deg); font-weight: bold; font-size: 12px; }
-        .legend-text-y { transform: translate(12px, 18px) rotate(45deg); font-weight: bold; font-size: 12px; }
+        /* Cleaned up CSS: separate legend container styling removed */
     </style>
 </head>
 <body>
 
     <div id="visualization-wrapper">
         <div id="map-container"></div>
-        <div id="legend-container"></div>
     </div>
 
     <script type="module">
@@ -61,18 +58,41 @@
                     range: d3.cross(blues, oranges).map(mixblend)
                 };
 
-                // Legend rendering
-                const legend = Plot.plot({
-                    color, axis: null, margin: 0, inset: 18, width: 136, height: 136, y: {reverse: true},
+                // Define Legend Function to create the inner plot
+                const createLegendPlot = () =>
+                  Plot.plot({
+                    color,
+                    axis: null,
+                    margin: 0,
+                    inset: 18,
+                    width: 136,
+                    height: 136,
+                    y: {reverse: true},
                     marks: [
-                        Plot.cell(d3.cross(d3.range(n), d3.range(n)), { x: ([a]) => a, y: ([, b]) => b, fill: ([a, b]) => n * a + b, inset: -1 }),
-                        Plot.text(["Precipitation →"], { frameAnchor: "bottom-right", dx: -18, dy: -6, className: "legend-text-x" }),
-                        Plot.text(["← Temperature"], { frameAnchor: "top-left", dx: 12, dy: 18, className: "legend-text-y" })
+                      Plot.cell(d3.cross(d3.range(n), d3.range(n)), {
+                        x: ([a, b]) => a,
+                        y: ([a, b]) => b,
+                        fill: ([a, b]) => n * a + b,
+                        inset: -1,
+                      }),
+                      // Text marks defined using standard Plot logic, not CSS
+                      Plot.text(["Precipitation →"], {
+                        frameAnchor: "bottom-right",
+                        fontWeight: "bold",
+                        dx: -18,
+                        dy: -6,
+                      }),
+                      Plot.text(["← Temperature"], {
+                        frameAnchor: "top-left",
+                        fontWeight: "bold",
+                        rotate: 90, // Positioned for rotation
+                        dx: 12,
+                        dy: 18
+                      })
                     ]
-                });
-                document.getElementById("legend-container").appendChild(legend);
+                  });
 
-                // Interpolator (simplified as NaNs are already removed)
+                // Interpolator function
                 function interpolateBivariate(n, v1, v2) {
                     const r = d3.range(n);
                     const s1 = d3.scaleQuantile(v1, r);
@@ -86,15 +106,30 @@
                     }
                 }
 
-                // Main Map - Clip removed since the data is pre-clipped
+                // Main Map Definition
                 const map = Plot.plot({
                     projection: { type: "albers", domain: australia, parallels: [-18, -36], rotate: [-132, 0] },
                     color, width: 900, height: 700,
                     marks: [
+                        // Fix 1: Add clip: australia back
                         Plot.raster({length: ppt.length}, {
                             x: lon, y: lat, fill: 0,
-                            interpolate: interpolateBivariate(n, ppt, temp)
+                            interpolate: interpolateBivariate(n, ppt, temp),
+                            clip: australia // constrain to landmass
                         }),
+                        
+                        // Fix 2: Embed and Rotate Legend
+                        // We use a custom mark function to add the legend SVG group inside the map's frame,
+                        // positioned in the bottom-right and rotated -45 degrees, as preferred in the UK example.
+                        (index, scale, {width, height}) => {
+                            const legendPlot = createLegendPlot();
+                            const g = d3.create("svg:g");
+                            // Position bottom-right of map canvas frame
+                            g.attr("style", `transform: translate(${width - 250}px, ${height - 250}px) rotate(-45deg);`);
+                            g.node().appendChild(legendPlot);
+                            return g.node();
+                        },
+                        
                         Plot.geo(australia, {strokeWidth: 0.5, stroke: "#333"})
                     ]
                 });
