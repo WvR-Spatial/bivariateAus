@@ -7,14 +7,34 @@
     <style>
         body { font-family: sans-serif; background: #f4f4f4; display: flex; justify-content: center; padding: 20px; margin: 0; }
         #visualization-wrapper { position: relative; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); max-width: 1000px; width: 100%; }
-        #map-container { width: 100%; overflow: hidden; }
-        /* Cleaned up CSS: separate legend container styling removed */
+        #map-container { width: 100%; overflow: hidden; position: relative; }
+        
+        /* The Legend: Positioned and rotated via CSS for better control */
+        #legend-container {
+            position: absolute;
+            bottom: 40px;
+            right: 40px;
+            transform: rotate(-45deg);
+            background: rgba(255, 255, 255, 0.8);
+            padding: 10px;
+            pointer-events: none; /* Allows clicks to pass through to the map if needed */
+        }
+        /* Counter-rotate labels so they are horizontal and legible */
+        .legend-label {
+            font-size: 11px;
+            font-weight: bold;
+            fill: #333;
+            transform-box: fill-box;
+            transform-origin: center;
+        }
     </style>
 </head>
 <body>
 
     <div id="visualization-wrapper">
-        <div id="map-container"></div>
+        <div id="map-container">
+            <div id="legend-container"></div>
+        </div>
     </div>
 
     <script type="module">
@@ -24,23 +44,23 @@
 
         async function initMap() {
             try {
-                // Fetch the lightweight JSON and the map geometry
                 const [climateData, world] = await Promise.all([
                     fetch("./climate_data.json").then(r => r.json()),
                     fetch("https://cdn.jsdelivr.net/npm/world-atlas@2/countries-10m.json").then(r => r.json())
                 ]);
 
-                // Map the JSON array into typed arrays for fast plotting
+                // 1. Clean up Geometry
+                // Merge all features named 'Australia' into one single MultiPolygon geometry
+                const australiaGeom = topojson.merge(world, world.objects.countries.geometries.filter(d => 
+                    d.properties?.name === "Australia" || d.id === "036"
+                ));
+
+                if (!australiaGeom) throw new Error("Could not find Australia in geometry data.");
+
                 const lon = Float32Array.from(climateData, d => d.lon);
                 const lat = Float32Array.from(climateData, d => d.lat);
                 const ppt = Float32Array.from(climateData, d => d.ppt);
                 const temp = Float32Array.from(climateData, d => d.temp);
-
-                const land = topojson.feature(world, world.objects.countries);
-                const australia = {
-                    type: "FeatureCollection",
-                    features: land.features.filter(d => d.properties.name === "Australia")
-                };
 
                 const n = 5;
                 const oranges = d3.schemeOranges[n + 1].slice(0, -1);
@@ -58,47 +78,44 @@
                     range: d3.cross(blues, oranges).map(mixblend)
                 };
 
-                // Define Legend Function to create the inner plot
-                const createLegendPlot = () =>
-                  Plot.plot({
-                    color,
+                // 2. Render the Legend
+                const legend = Plot.plot({
+                    width: 140,
+                    height: 140,
                     axis: null,
                     margin: 0,
-                    inset: 18,
-                    width: 136,
-                    height: 136,
-                    y: {reverse: true},
+                    style: { background: "none" },
                     marks: [
-                      Plot.cell(d3.cross(d3.range(n), d3.range(n)), {
-                        x: ([a, b]) => a,
-                        y: ([a, b]) => b,
-                        fill: ([a, b]) => n * a + b,
-                        inset: -1,
-                      }),
-                      // Text marks defined using standard Plot logic, not CSS
-                      Plot.text(["Precipitation →"], {
-                        frameAnchor: "bottom-right",
-                        fontWeight: "bold",
-                        dx: -18,
-                        dy: -6,
-                      }),
-                      Plot.text(["← Temperature"], {
-                        frameAnchor: "top-left",
-                        fontWeight: "bold",
-                        rotate: 90, // Positioned for rotation
-                        dx: 12,
-                        dy: 18
-                      })
+                        Plot.cell(d3.cross(d3.range(n), d3.range(n)), {
+                            x: ([a]) => a,
+                            y: ([, b]) => b,
+                            fill: ([a, b]) => n * a + b,
+                            inset: 0.5
+                        }),
+                        Plot.text(["Precipitation →"], {
+                            frameAnchor: "bottom",
+                            dy: 25,
+                            rotate: 45, // Counter-rotate relative to the parent -45deg
+                            fontSize: 10,
+                            fontWeight: "bold"
+                        }),
+                        Plot.text(["Temp →"], {
+                            frameAnchor: "left",
+                            dx: -25,
+                            rotate: 45,
+                            fontSize: 10,
+                            fontWeight: "bold"
+                        })
                     ]
-                  });
+                });
+                document.getElementById("legend-container").appendChild(legend);
 
-                // Interpolator function
+                // 3. Setup Bivariate Interpolator
                 function interpolateBivariate(n, v1, v2) {
                     const r = d3.range(n);
                     const s1 = d3.scaleQuantile(v1, r);
                     const s2 = d3.scaleQuantile(v2, r);
                     const interpolate = Plot.interpolatorBarycentric();
-                    
                     return function(I, w, h, X, Y) {
                         const V1 = interpolate(I, w, h, X, Y, v1);
                         const V2 = interpolate(I, w, h, X, Y, v2);
@@ -106,31 +123,26 @@
                     }
                 }
 
-                // Main Map Definition
+                // 4. Render the Main Map
                 const map = Plot.plot({
-                    projection: { type: "albers", domain: australia, parallels: [-18, -36], rotate: [-132, 0] },
-                    color, width: 900, height: 700,
+                    projection: { 
+                        type: "albers", 
+                        domain: australiaGeom, // Use merged geometry for domain
+                        parallels: [-18, -36], 
+                        rotate: [-132, 0] 
+                    },
+                    color, 
+                    width: 900, 
+                    height: 700,
                     marks: [
-                        // Fix 1: Add clip: australia back
                         Plot.raster({length: ppt.length}, {
-                            x: lon, y: lat, fill: 0,
+                            x: lon, 
+                            y: lat, 
+                            fill: 0,
                             interpolate: interpolateBivariate(n, ppt, temp),
-                            clip: australia // constrain to landmass
+                            clip: australiaGeom // FIX: Use the merged geometry object here
                         }),
-                        
-                        // Fix 2: Embed and Rotate Legend
-                        // We use a custom mark function to add the legend SVG group inside the map's frame,
-                        // positioned in the bottom-right and rotated -45 degrees, as preferred in the UK example.
-                        (index, scale, {width, height}) => {
-                            const legendPlot = createLegendPlot();
-                            const g = d3.create("svg:g");
-                            // Position bottom-right of map canvas frame
-                            g.attr("style", `transform: translate(${width - 250}px, ${height - 250}px) rotate(-45deg);`);
-                            g.node().appendChild(legendPlot);
-                            return g.node();
-                        },
-                        
-                        Plot.geo(australia, {strokeWidth: 0.5, stroke: "#333"})
+                        Plot.geo(australiaGeom, {strokeWidth: 0.7, stroke: "#444"})
                     ]
                 });
                 
@@ -138,6 +150,7 @@
 
             } catch (error) {
                 console.error("Map Error:", error);
+                document.getElementById("map-container").innerHTML = `<div style="padding: 20px; color: red;">${error}</div>`;
             }
         }
 
