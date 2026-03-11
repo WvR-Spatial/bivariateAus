@@ -5,26 +5,21 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Australia Bivariate Climate Map</title>
     <style>
-        body { font-family: sans-serif; background: #f4f4f4; display: flex; justify-content: center; padding: 20px; margin: 0; }
-        #visualization-wrapper { position: relative; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); max-width: 1000px; width: 100%; }
-        #map-container { width: 100%; overflow: hidden; position: relative; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #ececec; display: flex; justify-content: center; padding: 20px; margin: 0; }
+        #visualization-wrapper { position: relative; background: white; padding: 30px; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); max-width: 1100px; width: 100%; }
+        #map-container { width: 100%; overflow: hidden; position: relative; border: 1px solid #ddd; border-radius: 4px; }
         
-        /* The Legend: Positioned and rotated via CSS for better control */
+        /* Legend positioned top-left as requested */
         #legend-container {
             position: absolute;
-            bottom: 40px;
-            right: 40px;
+            top: 20px;
+            left: 20px;
+            z-index: 10;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
             transform: rotate(-45deg);
-            background: rgba(255, 255, 255, 0.8);
-            padding: 10px;
-            pointer-events: none; /* Allows clicks to pass through to the map if needed */
-        }
-        /* Counter-rotate labels so they are horizontal and legible */
-        .legend-label {
-            font-size: 11px;
-            font-weight: bold;
-            fill: #333;
-            transform-box: fill-box;
             transform-origin: center;
         }
     </style>
@@ -49,68 +44,52 @@
                     fetch("https://cdn.jsdelivr.net/npm/world-atlas@2/countries-10m.json").then(r => r.json())
                 ]);
 
-                // 1. Clean up Geometry
-                // Merge all features named 'Australia' into one single MultiPolygon geometry
                 const australiaGeom = topojson.merge(world, world.objects.countries.geometries.filter(d => 
                     d.properties?.name === "Australia" || d.id === "036"
                 ));
-
-                if (!australiaGeom) throw new Error("Could not find Australia in geometry data.");
 
                 const lon = Float32Array.from(climateData, d => d.lon);
                 const lat = Float32Array.from(climateData, d => d.lat);
                 const ppt = Float32Array.from(climateData, d => d.ppt);
                 const temp = Float32Array.from(climateData, d => d.temp);
 
-                const n = 5;
-                const oranges = d3.schemeOranges[n + 1].slice(0, -1);
-                const blues = d3.schemeBlues[n + 1].slice(0, -1);
+                // Settings: n=7 provides 49 increments
+                const n = 7; 
+                
+                // Professional Bivariate Palette (Pink-Blue scheme)
+                const colors = [
+                    "#e8e8e8", "#e4acac", "#c85a5a", "#b0d5df", "#ad9ea5", "#985356", "#64acbe", "#627f8c", "#574249"
+                ];
+                // We generate a 7x7 interpolation of these core colors
+                const colorRange = d3.cross(d3.range(n), d3.range(n)).map(([i, j]) => {
+                    return d3.interpolateLab(
+                        d3.interpolateLab("#e8e8e8", "#ff4500")(i / (n - 1)), // Temp axis (Red)
+                        d3.interpolateLab("#4682b4", "#800080")(i / (n - 1))  // Precip axis (Blue/Purple)
+                    )(j / (n - 1));
+                });
 
-                function mixblend([a, b]) {
-                    a = d3.rgb(a); b = d3.rgb(b);
-                    const l = Math.min(250, b.r + b.g + b.b);
-                    a.r *= b.r / l; a.g *= b.g / l; a.b *= b.b / l;
-                    return a.hex();
-                }
+                const colorScale = { domain: d3.range(n * n), range: colorRange };
 
-                const color = {
-                    domain: d3.range(n * n),
-                    range: d3.cross(blues, oranges).map(mixblend)
-                };
-
-                // 2. Render the Legend
+                // 1. Render the Legend
                 const legend = Plot.plot({
-                    width: 140,
-                    height: 140,
-                    axis: null,
-                    margin: 0,
-                    style: { background: "none" },
+                    width: 160, height: 160, axis: null, margin: 0,
                     marks: [
                         Plot.cell(d3.cross(d3.range(n), d3.range(n)), {
-                            x: ([a]) => a,
-                            y: ([, b]) => b,
-                            fill: ([a, b]) => n * a + b,
-                            inset: 0.5
+                            x: ([i]) => i, y: ([, j]) => j,
+                            fill: ([i, j]) => i + j * n,
+                            inset: 0 // Remove white gaps
                         }),
-                        Plot.text(["Precipitation →"], {
-                            frameAnchor: "bottom",
-                            dy: 25,
-                            rotate: 45, // Counter-rotate relative to the parent -45deg
-                            fontSize: 10,
-                            fontWeight: "bold"
-                        }),
-                        Plot.text(["Temp →"], {
-                            frameAnchor: "left",
-                            dx: -25,
-                            rotate: 45,
-                            fontSize: 10,
-                            fontWeight: "bold"
-                        })
+                        // Labels (Counter-rotated 45deg to appear horizontal)
+                        Plot.text(["Hotter →"], { frameAnchor: "bottom", dy: 35, rotate: 45, fontWeight: "bold", fontSize: 12 }),
+                        Plot.text(["Wetter →"], { frameAnchor: "left", dx: -35, rotate: 45, fontWeight: "bold", fontSize: 12 }),
+                        // Corner Descriptive Labels
+                        Plot.text(["Dry/Cold"], { x: 0, y: 0, dx: -15, dy: 15, rotate: 45, fontSize: 9 }),
+                        Plot.text(["Wet/Hot"], { x: n-1, y: n-1, dx: 15, dy: -15, rotate: 45, fontSize: 9 })
                     ]
                 });
                 document.getElementById("legend-container").appendChild(legend);
 
-                // 3. Setup Bivariate Interpolator
+                // 2. Bivariate Interpolator
                 function interpolateBivariate(n, v1, v2) {
                     const r = d3.range(n);
                     const s1 = d3.scaleQuantile(v1, r);
@@ -119,30 +98,29 @@
                     return function(I, w, h, X, Y) {
                         const V1 = interpolate(I, w, h, X, Y, v1);
                         const V2 = interpolate(I, w, h, X, Y, v2);
-                        return Uint8Array.from(V1, (_, i) => n * s1(V1[i]) + s2(V2[i]));
+                        return Uint8Array.from(V1, (_, i) => s1(V1[i]) + s2(V2[i]) * n);
                     }
                 }
 
-                // 4. Render the Main Map
+                // 3. Render the Main Map
                 const map = Plot.plot({
                     projection: { 
                         type: "albers", 
-                        domain: australiaGeom, // Use merged geometry for domain
+                        domain: australiaGeom, 
                         parallels: [-18, -36], 
                         rotate: [-132, 0] 
                     },
-                    color, 
-                    width: 900, 
-                    height: 700,
+                    color: colorScale,
+                    width: 1000, 
+                    height: 750,
+                    marginLeft: 100, // Move map right to accommodate top-left legend
                     marks: [
                         Plot.raster({length: ppt.length}, {
-                            x: lon, 
-                            y: lat, 
-                            fill: 0,
-                            interpolate: interpolateBivariate(n, ppt, temp),
-                            clip: australiaGeom // FIX: Use the merged geometry object here
+                            x: lon, y: lat, fill: 0,
+                            interpolate: interpolateBivariate(n, temp, ppt), // x=Temp, y=Precip
+                            clip: australiaGeom
                         }),
-                        Plot.geo(australiaGeom, {strokeWidth: 0.7, stroke: "#444"})
+                        Plot.geo(australiaGeom, {strokeWidth: 0.8, stroke: "#222"})
                     ]
                 });
                 
@@ -150,10 +128,8 @@
 
             } catch (error) {
                 console.error("Map Error:", error);
-                document.getElementById("map-container").innerHTML = `<div style="padding: 20px; color: red;">${error}</div>`;
             }
         }
-
         initMap();
     </script>
 </body>
