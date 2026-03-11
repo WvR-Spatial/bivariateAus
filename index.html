@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Australia Bivariate Climate Map</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            background: #f4f4f4;
+            display: flex;
+            justify-content: center;
+            padding: 20px;
+            margin: 0;
+        }
+        #visualization-wrapper {
+            position: relative;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            max-width: 1000px;
+            width: 100%;
+        }
+        #map-container {
+            width: 100%;
+            overflow: hidden;
+        }
+        /* Rotates the legend into the diamond shape from the original Observable example */
+        #legend-container {
+            position: absolute;
+            bottom: 60px;
+            right: 60px;
+            transform: rotate(-45deg);
+            background: rgba(255, 255, 255, 0.9);
+            padding: 10px;
+            border-radius: 4px;
+        }
+        /* Counter-rotate the text so it remains readable */
+        .legend-text-x { transform: translate(-18px, -6px) rotate(45deg); font-weight: bold; font-size: 12px; }
+        .legend-text-y { transform: translate(12px, 18px) rotate(45deg); font-weight: bold; font-size: 12px; }
+    </style>
+</head>
+<body>
+
+    <div id="visualization-wrapper">
+        <div id="map-container"></div>
+        <div id="legend-container"></div>
+    </div>
+
+    <script type="module">
+        import * as d3 from "https://cdn.jsdelivr.net/npm/d3@7.8.5/+esm";
+        import * as Plot from "https://cdn.jsdelivr.net/npm/@observablehq/plot@0.6.13/+esm";
+        import * as topojson from "https://cdn.jsdelivr.net/npm/topojson-client@3.1.0/+esm";
+        import { NetCDFReader } from "https://cdn.jsdelivr.net/npm/netcdfjs@3.0.0/+esm";
+
+        // Helper to load and parse NetCDF files via Fetch API
+        async function loadCDF(url) {
+            const response = await fetch(url);
+            if (!response.ok) throw new Error(`Failed to load ${url}`);
+            const buffer = await response.arrayBuffer();
+            return new NetCDFReader(buffer);
+        }
+
+        async function initMap() {
+            try {
+                // Fetch all data sources concurrently
+                const [tmaxReader, tminReader, pptReader, world] = await Promise.all([
+                    loadCDF("./tmax.nc"),
+                    loadCDF("./tmin.nc"),
+                    loadCDF("./ppt.nc"),
+                    fetch("https://cdn.jsdelivr.net/npm/world-atlas@2/countries-10m.json").then(r => r.json())
+                ]);
+
+                // 1. Process Geometry
+                const land = topojson.feature(world, world.objects.countries);
+                const australia = {
+                    type: "FeatureCollection",
+                    features: land.features.filter(d => d.properties.name === "Australia")
+                };
+
+                // 2. Process NetCDF Data Grids
+                const tmaxData = tmaxReader.getDataVariable("tmax");
+                const tminData = tminReader.getDataVariable("tmin");
+                const pptData = pptReader.getDataVariable("ppt");
+                const latData = pptReader.getDataVariable("lat");
+                const lonData = pptReader.getDataVariable("lon");
+
+                const numCells = latData.length * lonData.length;
+                const lat = new Float32Array(numCells);
+                const lon = new Float32Array(numCells);
+                const temp = new Float32Array(numCells);
+                const ppt = new Float32Array(numCells);
+
+                // Flatten the lat/lon grid and calculate mean temperature
+                let idx = 0;
+                for (let i = 0; i < latData.length; i++) {
+                    for (let j = 0; j < lonData.length; j++) {
+                        lat[idx] = latData[i];
+                        lon[idx] = lonData[j];
+                        ppt[idx] = pptData[idx];
+                        temp[idx] = (tmaxData[idx] + tminData[idx]) / 2;
+                        idx++;
+                    }
+                }
+
+                // 3. Define Bivariate Color Scale Logic
+                const n = 5;
+                const oranges = d3.schemeOranges[n + 1].slice(0, -1);
+                const blues = d3.schemeBlues[n + 1].slice(0, -1);
+
+                function mixblend([a, b]) {
+                    a = d3.rgb(a);
+                    b = d3.rgb(b);
+                    const l = Math.min(250, b.r + b.g + b.b);
+                    a.r *= b.r / l;
+                    a.g *= b.g / l;
+                    a.b *= b.b / l;
+                    return a.hex();
+                }
+
+                const color = {
+                    domain: d3.range(n * n),
+                    range: d3.cross(blues, oranges).map(mixblend)
+                };
+
+                // 4. Generate Legend
+                const legend = Plot.plot({
+                    color,
+                    axis: null,
+                    margin: 0,
+                    inset: 18,
+                    width: 136,
+                    height: 136,
+                    y: {reverse: true},
+                    marks: [
+                        Plot.cell(d3.cross(d3.range(n), d3.range(n)), {
+                            x: ([a]) => a,
+                            y: ([, b]) => b,
+                            fill: ([a, b]) => n * a + b,
+                            inset: -1,
+                        }),
+                        Plot.text(["Precipitation →"], {
+                            frameAnchor: "bottom-right",
+                            dx: -18,
+                            dy: -6,
+                            className: "legend-text-x"
+                        }),
+                        Plot.text(["← Temperature"], {
+                            frameAnchor: "top-left",
+                            dx: 12,
+                            dy: 18,
+                            className: "legend-text-y"
+                        })
+                    ]
+                });
+                document.getElementById("legend-container").appendChild(legend);
+
+                // 5. Setup Interpolator
+                function interpolateBivariate(n, v1, v2) {
+                    // Filter out NetCDF fill values (usually extreme negative numbers)
+                    const validIndices = d3.range(n).filter(i => v1[i] > -1000 && v2[i] > -1000);
+                    const validV1 = validIndices.map(i => v1[i]);
+                    const validV2 = validIndices.map(i => v2[i]);
+
+                    const r = d3.range(n);
+                    const s1 = d3.scaleQuantile(validV1, r);
+                    const s2 = d3.scaleQuantile(validV2, r);
+                    const interpolate = Plot.interpolatorBarycentric();
+                    
+                    return function(I, w, h, X, Y) {
+                        // Ignore nodata coordinates during rendering
+                        I = I.filter(i => !isNaN(v1[i]) && !isNaN(v2[i]) && v1[i] > -1000 && v2[i] > -1000);
+                        const V1 = interpolate(I, w, h, X, Y, v1);
+                        const V2 = interpolate(I, w, h, X, Y, v2);
+                        return Uint8Array.from(V1, (_, i) => n * s1(V1[i]) + s2(V2[i]));
+                    }
+                }
+
+                // 6. Generate Main Map
+                const map = Plot.plot({
+                    projection: {
+                        type: "albers",
+                        domain: australia, 
+                        parallels: [-18, -36],
+                        rotate: [-132, 0] // Negative longitude for central meridian
+                    },
+                    color,
+                    width: 900,
+                    height: 700,
+                    marks: [
+                        Plot.raster({length: ppt.length}, {
+                            x: lon,
+                            y: lat,
+                            fill: 0,
+                            interpolate: interpolateBivariate(n, ppt, temp),
+                            clip: australia
+                        }),
+                        Plot.geo(australia, {strokeWidth: 0.5, stroke: "#333"})
+                    ]
+                });
+                
+                document.getElementById("map-container").appendChild(map);
+
+            } catch (error) {
+                console.error("Error loading map data:", error);
+                document.getElementById("map-container").innerHTML = `<p style="color:red;">Error loading map data. Ensure you are running a local server and the .nc files are in the same directory.</p>`;
+            }
+        }
+
+        initMap();
+    </script>
+</body>
+</html>
