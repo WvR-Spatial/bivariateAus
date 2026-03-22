@@ -1,192 +1,574 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<title>Australia Bivariate Climate Map</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Australia Bivariate Climate Map</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg:       #141e26;
+            --surface:  #1c2d3a;
+            --surface2: #243444;
+            --accent:   #3d9fbf;
+            --accent2:  #5bc4a0;
+            --text:     #d4e6f0;
+            --muted:    #5a7f96;
+            --border:   #2a3d4e;
+        }
 
-<style>
-body {
-    margin: 0;
-    font-family: sans-serif;
-    background: #1f2a30; /* gunmetal */
-}
+        * { box-sizing: border-box; margin: 0; padding: 0; }
 
-#wrapper {
-    max-width: 1100px;
-    margin: auto;
-    padding: 20px;
-    background: #2b3a40;
-    border-radius: 12px;
-}
+        body {
+            font-family: 'DM Sans', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 24px 16px 32px;
+            gap: 16px;
+            /* Subtle noise texture for depth */
+            background-image:
+                radial-gradient(ellipse at 20% 10%, rgba(61,159,191,0.06) 0%, transparent 55%),
+                radial-gradient(ellipse at 80% 90%, rgba(91,196,160,0.04) 0%, transparent 55%);
+        }
 
-#map-container {
-    position: relative;
-}
+        #app {
+            width: 100%;
+            max-width: 1080px;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+        }
 
-#legend {
-    position: absolute;
-    top: 20px;
-    left: 20px;
-    background: rgba(30,40,45,0.9);
-    padding: 12px;
-    border-radius: 6px;
-}
+        /* ── Header ─────────────────────────────────────────────────────── */
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 12px;
+        }
 
-#controls {
-    margin-top: 10px;
-    color: white;
-}
-</style>
+        .header-left { display: flex; flex-direction: column; gap: 4px; }
+
+        .eyebrow {
+            font-family: 'DM Mono', monospace;
+            font-size: 0.65rem;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+            color: var(--accent);
+        }
+
+        h1 {
+            font-size: 1.5rem;
+            font-weight: 600;
+            line-height: 1.15;
+            color: var(--text);
+        }
+
+        h1 span { color: var(--accent2); }
+
+        .subtitle {
+            font-size: 0.72rem;
+            color: var(--muted);
+            font-weight: 300;
+        }
+
+        .header-meta {
+            font-family: 'DM Mono', monospace;
+            font-size: 0.62rem;
+            color: var(--muted);
+            text-align: right;
+            line-height: 1.8;
+        }
+
+        /* ── Map wrapper ────────────────────────────────────────────────── */
+        #map-wrapper {
+            position: relative;
+            background: var(--surface);
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            overflow: hidden;
+            box-shadow:
+                0 2px 4px rgba(0,0,0,0.3),
+                0 8px 32px rgba(0,0,0,0.4),
+                inset 0 1px 0 rgba(255,255,255,0.04);
+        }
+
+        #map-container svg {
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+
+        /* Loading overlay */
+        #loading {
+            position: absolute;
+            inset: 0;
+            background: rgba(20,30,38,0.92);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            z-index: 20;
+            transition: opacity 0.2s;
+        }
+
+        #loading.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .spinner {
+            width: 28px; height: 28px;
+            border: 2px solid var(--border);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .loading-text {
+            font-family: 'DM Mono', monospace;
+            font-size: 0.72rem;
+            letter-spacing: 0.1em;
+            color: var(--accent);
+        }
+
+        /* ── Controls ───────────────────────────────────────────────────── */
+        #controls {
+            background: var(--surface);
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            padding: 18px 24px 16px;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+        }
+
+        .ctrl-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            margin-bottom: 14px;
+        }
+
+        .ctrl-label {
+            font-family: 'DM Mono', monospace;
+            font-size: 0.62rem;
+            text-transform: uppercase;
+            letter-spacing: 0.14em;
+            color: var(--muted);
+        }
+
+        #decade-display {
+            font-family: 'DM Mono', monospace;
+            font-size: 1.25rem;
+            font-weight: 500;
+            color: var(--accent);
+            letter-spacing: 0.04em;
+        }
+
+        /* Range slider */
+        input[type=range] {
+            width: 100%;
+            -webkit-appearance: none;
+            appearance: none;
+            height: 3px;
+            border-radius: 2px;
+            background: linear-gradient(to right, var(--accent) 0%, var(--accent2) 100%);
+            outline: none;
+            cursor: pointer;
+        }
+
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 15px; height: 15px;
+            border-radius: 50%;
+            background: var(--surface2);
+            border: 2px solid var(--accent);
+            box-shadow: 0 0 0 3px rgba(61,159,191,0.15);
+            cursor: pointer;
+            transition: border-color 0.15s, box-shadow 0.15s;
+        }
+
+        input[type=range]::-webkit-slider-thumb:hover {
+            border-color: var(--accent2);
+            box-shadow: 0 0 0 4px rgba(91,196,160,0.2);
+        }
+
+        /* Decade tick labels */
+        .ticks {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 8px;
+            padding: 0 1px;
+        }
+
+        .tick {
+            font-family: 'DM Mono', monospace;
+            font-size: 0.65rem;
+            color: var(--muted);
+            cursor: pointer;
+            user-select: none;
+            transition: color 0.15s;
+            padding: 2px 0;
+        }
+
+        .tick:hover { color: var(--text); }
+        .tick.active {
+            color: var(--accent);
+            font-weight: 500;
+        }
+
+        /* ── Footer ─────────────────────────────────────────────────────── */
+        footer {
+            font-size: 0.67rem;
+            color: var(--muted);
+            text-align: center;
+            font-weight: 300;
+        }
+
+        footer a { color: var(--accent); text-decoration: none; }
+        footer a:hover { text-decoration: underline; }
+    </style>
 </head>
-
 <body>
-<div id="wrapper">
-    <div id="map-container">
-        <div id="legend"></div>
+<div id="app">
+
+    <header>
+        <div class="header-left">
+            <span class="eyebrow">Gridded Climate Analysis</span>
+            <h1>Australia <span>Bivariate Climate</span></h1>
+            <p class="subtitle">Mean annual temperature × total annual precipitation</p>
+        </div>
+        <div class="header-meta">
+            SILO gridded data<br>
+            1960 – 2023<br>
+            0.05° resolution
+        </div>
+    </header>
+
+    <div id="map-wrapper">
+        <div id="loading">
+            <div class="spinner"></div>
+            <span class="loading-text">Loading climate data…</span>
+        </div>
+        <div id="map-container"></div>
     </div>
 
     <div id="controls">
-        <input type="range" id="slider" min="0" max="0" value="0" disabled>
-        <span id="yearLabel">Static dataset</span>
+        <div class="ctrl-row">
+            <span class="ctrl-label">Decade</span>
+            <span id="decade-display">1990s</span>
+        </div>
+        <input type="range" id="slider" min="0" max="6" value="3" step="1">
+        <div class="ticks" id="ticks"></div>
     </div>
-</div>
+
+    <footer>
+        Data: <a href="https://www.longpaddock.qld.gov.au/silo/" target="_blank">SILO · Queensland Government</a>
+        &ensp;·&ensp;
+        Rendered with <a href="https://observablehq.com/plot/" target="_blank">Observable Plot</a> & D3
+    </footer>
+
+</div><!-- #app -->
 
 <script type="module">
-import * as d3 from "https://cdn.jsdelivr.net/npm/d3@7/+esm";
-import * as Plot from "https://cdn.jsdelivr.net/npm/@observablehq/plot@0.6/+esm";
-import * as topojson from "https://cdn.jsdelivr.net/npm/topojson-client@3/+esm";
+import * as d3   from "https://cdn.jsdelivr.net/npm/d3@7.8.5/+esm";
+import * as Plot from "https://cdn.jsdelivr.net/npm/@observablehq/plot@0.6.17/+esm";
+import * as topo from "https://cdn.jsdelivr.net/npm/topojson-client@3.1.0/+esm";
 
-const n = 5; // clarity over complexity
+// ── Constants ─────────────────────────────────────────────────────────────────
+const DECADES = ["1960s","1970s","1980s","1990s","2000s","2010s","2020s"];
+const n       = 5;          // bivariate grid size: n×n = 25 colours
+const MAP_W   = 1000;
+const MAP_H   = 720;
+const SVG_NS  = "http://www.w3.org/2000/svg";
 
-const data = await fetch("./climate_data.json").then(r => r.json());
-const world = await fetch("https://cdn.jsdelivr.net/npm/world-atlas@2/countries-10m.json").then(r => r.json());
+// ── Bivariate colour scheme ───────────────────────────────────────────────────
+//
+//  Axis 1 (v1 = temperature) :  cold ─── blue  →  hot ─── red
+//  Axis 2 (v2 = precipitation): dry  ─── tan   →  wet ─── green
+//
+//  Final palette uses a multiply-blend so all four quadrants are distinct:
+//    cold + dry  →  muted slate-blue
+//    cold + wet  →  teal / forest-blue
+//    hot  + dry  →  terracotta / brick-red
+//    hot  + wet  →  olive / khaki
 
-const australia = topojson.merge(
-  world,
-  world.objects.countries.geometries.filter(d =>
-    d.properties?.name === "Australia" || d.id === "036"
-  )
+const tempColors = d3.range(n).map(i =>
+    d3.interpolateRdBu(1 - i / (n - 1))   // RdBu reversed: 0=cold/blue, 1=hot/red
 );
 
-// --- DATA ARRAYS ---
-const lon = Float32Array.from(data, d => d.lon);
-const lat = Float32Array.from(data, d => d.lat);
-const temp = Float32Array.from(data, d => d.temp);
-const ppt = Float32Array.from(data, d => d.ppt);
+const precipColors = d3.range(n).map(i =>
+    d3.interpolateLab("#c4a46a", "#2d8b4e")(i / (n - 1))  // tan → green
+);
 
-// --- QUANTILE SCALES (SHARED) ---
-const sTemp = d3.scaleQuantile(temp, d3.range(n));
-const sPpt = d3.scaleQuantile(ppt, d3.range(n));
-
-// --- COLOUR AXES ---
-const tempColor = d3.scaleLinear()
-    .domain([d3.min(temp), d3.max(temp)])
-    .range(["#2c7bb6", "#d7191c"]); // blue → red
-
-const pptColor = d3.scaleLinear()
-    .domain([d3.min(ppt), d3.max(ppt)])
-    .range(["#d8b365", "#1a9850"]); // tan → green
-
-// --- BLENDING FUNCTION ---
-function blend(c1, c2) {
-    c1 = d3.lab(c1);
-    c2 = d3.lab(c2);
-    return d3.lab(
-        (c1.l + c2.l) / 2,
-        (c1.a + c2.a) / 2,
-        (c1.b + c2.b) / 2
-    ).formatHex();
+function mixblend([a, b]) {
+    // Multiply colour channels, normalised by luminance of b
+    a = d3.rgb(a);
+    b = d3.rgb(b);
+    const l = Math.min(250, b.r + b.g + b.b);
+    a.r = a.r * b.r / l;
+    a.g = a.g * b.g / l;
+    a.b = a.b * b.b / l;
+    return a.hex();
 }
 
-// --- BUILD COLOR MATRIX ---
-const colorMatrix = d3.cross(d3.range(n), d3.range(n)).map(([i, j]) => {
-    const t = d3.quantile(temp, (i + 0.5) / n);
-    const p = d3.quantile(ppt, (j + 0.5) / n);
-    return blend(tempColor(t), pptColor(p));
-});
-
-const colorScale = {
+// color.range index = n * tempIdx + precipIdx
+// d3.cross outer=temp, inner=precip → index i*n+j matches exactly
+const color = {
     domain: d3.range(n * n),
-    range: colorMatrix
+    range:  d3.cross(tempColors, precipColors).map(mixblend)
 };
 
-// --- INTERPOLATOR ---
+// ── Bivariate interpolator ────────────────────────────────────────────────────
+//
+//  FIXED: the original prototype had  s1(V1[i]) + s2(V2[i]) * n
+//  The correct formula is             n * s1(V1[i]) + s2(V2[i])
+//  because temp is the outer (high-significance) dimension of d3.cross.
+
 function interpolateBivariate(n, v1, v2) {
-    const interpolate = Plot.interpolatorBarycentric();
+    const r  = d3.range(n);
+    const s1 = d3.scaleQuantile(v1, r);   // maps temp values → 0..n-1
+    const s2 = d3.scaleQuantile(v2, r);   // maps precip values → 0..n-1
+    const bary = Plot.interpolatorBarycentric();
 
     return function(I, w, h, X, Y) {
-        const V1 = interpolate(I, w, h, X, Y, v1);
-        const V2 = interpolate(I, w, h, X, Y, v2);
+        // Filter points with missing data before barycentric triangulation
+        I = I.filter(i => !isNaN(v1[i]) && !isNaN(v2[i]));
+        const V1 = bary(I, w, h, X, Y, v1);
+        const V2 = bary(I, w, h, X, Y, v2);
+        return Uint8Array.from(V1, (_, i) => n * s1(V1[i]) + s2(V2[i]));
+    };
+}
 
-        return Uint8Array.from(V1, (_, i) =>
-            sTemp(V1[i]) + sPpt(V2[i]) * n
+// ── Legend ────────────────────────────────────────────────────────────────────
+//
+//  The 5×5 cell grid is rendered as a separate Plot SVG, then its graphical
+//  children are cloned into the main map SVG inside a rotated <g> wrapper,
+//  producing a diamond shape. Axis labels are added as horizontal text at
+//  the four tips of the diamond.
+
+const LEG_SIZE = 112;   // cell-grid side in px
+const LEG_CX   = 118;   // diamond centre-x in map SVG space
+const LEG_CY   = 548;   // diamond centre-y in map SVG space
+
+function buildLegendGrid() {
+    return Plot.plot({
+        color,
+        axis:   null,
+        margin: 0,
+        width:  LEG_SIZE,
+        height: LEG_SIZE,
+        marks: [
+            Plot.cell(d3.cross(d3.range(n), d3.range(n)), {
+                x:    ([a])    => a,           // temp index  0..4
+                y:    ([, b])  => b,           // precip index 0..4
+                fill: ([a, b]) => n * a + b,   // matches color.range index
+                inset: -0.5                    // remove inter-cell gaps
+            })
+        ]
+    });
+}
+
+function injectLegend(mapSvg) {
+    const leg  = buildLegendGrid();
+    const half = LEG_SIZE / 2;
+    const tipR = Math.round(half * Math.SQRT2);  // distance from centre to diamond tip
+
+    // ── Rotate cell grid -45° around its own centre, then translate ──────────
+    const wrapper = document.createElementNS(SVG_NS, "g");
+    wrapper.setAttribute(
+        "transform",
+        `translate(${LEG_CX - half}, ${LEG_CY - half}) rotate(-45, ${half}, ${half})`
+    );
+
+    // Separate <style> from graphical elements before injection
+    Array.from(leg.children).forEach(child => {
+        if (child.tagName === "style") {
+            // Styles need to live at SVG root scope, not inside a <g>
+            mapSvg.appendChild(child.cloneNode(true));
+        } else {
+            wrapper.appendChild(child.cloneNode(true));
+        }
+    });
+    mapSvg.appendChild(wrapper);
+    leg.remove();
+
+    // ── Thin diamond outline ─────────────────────────────────────────────────
+    const d2  = half * Math.SQRT2;
+    const pts = [
+        [LEG_CX,      LEG_CY - d2],
+        [LEG_CX + d2, LEG_CY     ],
+        [LEG_CX,      LEG_CY + d2],
+        [LEG_CX - d2, LEG_CY     ]
+    ].map(p => p.join(",")).join(" ");
+
+    const outline = document.createElementNS(SVG_NS, "polygon");
+    outline.setAttribute("points", pts);
+    outline.setAttribute("fill",         "none");
+    outline.setAttribute("stroke",       "#3a556a");
+    outline.setAttribute("stroke-width", "0.8");
+    mapSvg.insertBefore(outline, wrapper);  // draw behind cells
+
+    // ── Axis labels at diamond tips ──────────────────────────────────────────
+    function addLabel(x, y, text, anchor, dy = 0) {
+        const t = document.createElementNS(SVG_NS, "text");
+        t.setAttribute("x", x);
+        t.setAttribute("y", y + dy);
+        t.setAttribute("text-anchor",       anchor);
+        t.setAttribute("dominant-baseline", "middle");
+        t.setAttribute("font-size",   "9.5");
+        t.setAttribute("font-weight", "600");
+        t.setAttribute("fill",        "#9bbdcc");
+        t.setAttribute("font-family", "DM Mono, monospace");
+        t.setAttribute("pointer-events", "none");
+        t.textContent = text;
+        mapSvg.appendChild(t);
+    }
+
+    const pad = 9;
+    addLabel(LEG_CX + tipR + pad, LEG_CY,         "hotter →", "start");
+    addLabel(LEG_CX - tipR - pad, LEG_CY,         "← colder", "end");
+    addLabel(LEG_CX,              LEG_CY - tipR,  "wetter",   "middle", -pad);
+    addLabel(LEG_CX,              LEG_CY + tipR,  "drier",    "middle", +pad + 4);
+
+    // ── Legend title ─────────────────────────────────────────────────────────
+    const title = document.createElementNS(SVG_NS, "text");
+    title.setAttribute("x",                LEG_CX);
+    title.setAttribute("y",                LEG_CY - tipR - 26);
+    title.setAttribute("text-anchor",      "middle");
+    title.setAttribute("dominant-baseline","middle");
+    title.setAttribute("font-size",        "8");
+    title.setAttribute("fill",             "#5a7f96");
+    title.setAttribute("font-family",      "DM Mono, monospace");
+    title.setAttribute("letter-spacing",   "0.08em");
+    title.textContent = "TEMP × PRECIP";
+    mapSvg.appendChild(title);
+}
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let australiaGeom = null;
+
+// ── Main render ───────────────────────────────────────────────────────────────
+async function renderDecade(idx) {
+    // Update UI state
+    document.getElementById("decade-display").textContent = DECADES[idx];
+    document.querySelectorAll(".tick").forEach((el, i) =>
+        el.classList.toggle("active", i === idx)
+    );
+
+    const loading = document.getElementById("loading");
+    loading.classList.remove("hidden");
+
+    try {
+        const data = await fetch(`./data/climate_${DECADES[idx]}.json`)
+            .then(r => { if (!r.ok) throw new Error(r.statusText); return r.json(); });
+
+        // Convert columnar arrays to typed arrays (faster for Plot raster)
+        const lon  = Float32Array.from(data.lo);
+        const lat  = Float32Array.from(data.la);
+        const temp = Float32Array.from(data.t);
+        const ppt  = Float32Array.from(data.p);
+
+        const map = Plot.plot({
+            projection: {
+                type:      "albers",
+                domain:    australiaGeom,
+                parallels: [-18, -36],
+                rotate:    [-132, 0]
+            },
+            color,
+            width:  MAP_W,
+            height: MAP_H,
+            // Dark ocean background matches page theme
+            style: { background: "#111c26" },
+            marks: [
+                // Bivariate raster clipped to Australia land boundary
+                Plot.raster({ length: ppt.length }, {
+                    x:           lon,
+                    y:           lat,
+                    fill:        0,
+                    interpolate: interpolateBivariate(n, temp, ppt),
+                    clip:        australiaGeom
+                }),
+                // Coastline — fill:none critical; default fill would obscure raster
+                Plot.geo(australiaGeom, {
+                    fill:        "none",
+                    stroke:      "#7a9eb0",
+                    strokeWidth: 0.65
+                })
+            ]
+        });
+
+        injectLegend(map);
+
+        const container = document.getElementById("map-container");
+        container.innerHTML = "";
+        container.appendChild(map);
+
+    } catch (err) {
+        console.error("Render error:", err);
+        document.querySelector(".loading-text").textContent =
+            `Error: ${err.message}`;
+        return;   // keep loading overlay visible on error
+    }
+
+    loading.classList.add("hidden");
+}
+
+// ── UI setup ──────────────────────────────────────────────────────────────────
+const slider  = document.getElementById("slider");
+const ticksEl = document.getElementById("ticks");
+
+DECADES.forEach((label, i) => {
+    const t = document.createElement("span");
+    t.className = "tick" + (i === 3 ? " active" : "");
+    t.textContent = label;
+    t.addEventListener("click", () => {
+        slider.value = i;
+        renderDecade(i);
+    });
+    ticksEl.appendChild(t);
+});
+
+// Debounce slider slightly so dragging doesn't fire concurrent fetches
+let sliderTimer = null;
+slider.addEventListener("input", () => {
+    clearTimeout(sliderTimer);
+    sliderTimer = setTimeout(() => renderDecade(+slider.value), 120);
+});
+
+// ── Initialise ────────────────────────────────────────────────────────────────
+async function init() {
+    try {
+        const world = await fetch(
+            "https://cdn.jsdelivr.net/npm/world-atlas@2/countries-10m.json"
+        ).then(r => r.json());
+
+        // ISO numeric 036 = Australia; merge all geometries into one polygon
+        australiaGeom = topo.merge(
+            world,
+            world.objects.countries.geometries.filter(d => d.id === "036")
         );
+
+        await renderDecade(3);   // default: 1990s
+
+    } catch (err) {
+        console.error("Init error:", err);
+        document.querySelector(".loading-text").textContent =
+            "Failed to load base map.";
     }
 }
 
-// --- LEGEND ---
-function buildLegend() {
-    return Plot.plot({
-        width: 180,
-        height: 180,
-        axis: null,
-        margin: 10,
-        marks: [
-            Plot.cell(d3.cross(d3.range(n), d3.range(n)), {
-                x: ([i]) => i,
-                y: ([, j]) => j,
-                fill: ([i, j]) => i + j * n
-            }),
-            Plot.text(["Hotter →"], {
-                frameAnchor: "bottom",
-                dy: 20,
-                fontWeight: "bold"
-            }),
-            Plot.text(["Wetter →"], {
-                frameAnchor: "left",
-                dx: -20,
-                rotate: -90,
-                fontWeight: "bold"
-            }),
-            Plot.text(["Cold"], {x: 0, y: n-1, dy: 15}),
-            Plot.text(["Hot"], {x: n-1, y: n-1, dy: 15}),
-            Plot.text(["Dry"], {x: 0, y: 0, dy: -10}),
-            Plot.text(["Wet"], {x: n-1, y: 0, dy: -10})
-        ]
-    });
-}
-
-// --- MAP RENDER ---
-function renderMap() {
-    const map = Plot.plot({
-        projection: {
-            type: "albers",
-            domain: australia,
-            parallels: [-18, -36],
-            rotate: [-132, 0]
-        },
-        width: 1000,
-        height: 750,
-        color: colorScale,
-        marks: [
-            Plot.raster({length: temp.length}, {
-                x: lon,
-                y: lat,
-                fill: 0,
-                interpolate: interpolateBivariate(n, temp, ppt),
-                clip: australia
-            }),
-            Plot.geo(australia, {stroke: "#aaa"})
-        ]
-    });
-
-    document.getElementById("map-container").appendChild(map);
-}
-
-// --- INIT ---
-document.getElementById("legend").appendChild(buildLegend());
-renderMap();
-
+init();
 </script>
 </body>
 </html>
